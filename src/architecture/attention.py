@@ -34,7 +34,7 @@ class MultiHeadedAttention(nn.Module):
         self.d_k = d_k
         self.h = h
         self.dropout = nn.Dropout(p=dropout)
-        self.head_projections = [clones(nn.Linear(d_model, d_k), 3) for i in range(h)]
+        self.head_projections = clones(clones(nn.Linear(d_model, d_k), 3),h)
         self.final_projection = nn.Linear(d_model,d_model)
         
         # storage attribute for visualization purposes. is re-populated for each
@@ -71,5 +71,9 @@ class MultiHeadedAttention(nn.Module):
         
         # apply final linear projection for this layer
         projected_attention = self.final_projection(multi_attention)
+        
+        del head_query_w
+        del head_key_w
+        del head_value_w
         
         return projected_attention
