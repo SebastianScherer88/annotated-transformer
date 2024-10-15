@@ -9,10 +9,10 @@ class Generator(nn.Module):
         self.proj = nn.Linear(d_model, vocab_size)
 
     def forward(self, x):
-        print(f"[GENERATOR] Generator input: {x.size()}")
+        #print(f"[GENERATOR] Generator input: {x.size()}")
         
         x = log_softmax(self.proj(x), dim=-1)
         
-        print(f"[GENERATOR] Generator output: {x.size()}")
+        #print(f"[GENERATOR] Generator output: {x.size()}")
         
         return x

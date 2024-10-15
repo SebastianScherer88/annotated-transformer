@@ -4,54 +4,72 @@ import math
 
 from utils import clones
 
-def attention(query, key, value, mask=None, dropout=None):
-    "Compute 'Scaled Dot Product Attention'"
+def attention(query, key, value, coefficient_mask = None, dropout=None):
+    # Expected tensor dimensions:
+    # query: # (n_batch, n_query, d_k)
+    # key: # (n_batch, n_key, d_k)
+    # value: # (n_batch, n_key, d_k)
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
-    if mask is not None:
-        scores = scores.masked_fill(mask == 0, -1e9)
-    p_attn = scores.softmax(dim=-1)
+    softmax_input = torch.matmul(query, key.transpose(-2,-1)) / math.sqrt(d_k) # (n_batch, n_query, n_key)
+    
+    if coefficient_mask is not None:
+        softmax_input = softmax_input.masked_fill(coefficient_mask == 0, -1e9) # (n_batch, n_query, n_key)
+    
+    coefficient = softmax_input.softmax(dim=-1) # (n_batch, n_query, n_key)
+    
     if dropout is not None:
-        p_attn = dropout(p_attn)
-    return torch.matmul(p_attn, value), p_attn
+        coefficient = dropout(coefficient) # (n_batch, n_query, n_key)
+        
+    attention = torch.matmul(coefficient, value) # (n_batch, n_query, d_k)
+    
+    return attention, coefficient
 
 class MultiHeadedAttention(nn.Module):
-    def __init__(self, h: int, d_model: int, dropout=0.1):
+    def __init__(self, h: int, d_model: int, dropout:float=0.1):
         "Take in model size and number of heads."
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
         # We assume d_v always equals d_k
-        self.d_k = d_model // h
+        d_k = d_model // h
+        self.d_k = d_k
         self.h = h
-        self.linears = clones(nn.Linear(d_model, d_model), 3)
-        self.attn = None
         self.dropout = nn.Dropout(p=dropout)
-
+        self.head_projections = [clones(nn.Linear(d_model, d_k), 3) for i in range(h)]
+        self.final_projection = nn.Linear(d_model,d_model)
+        
+        # storage attribute for visualization purposes. is re-populated for each
+        # forward pass to hold the coefficient return from the `attention` 
+        # method. 
+        # Expected dimension: (n_batch, n_sequence, n_sequence, h)
+        self.attn = None
+        
     def forward(self, query, key, value, mask=None):
-        "Implements Figure 2"
-        if mask is not None:
-            # Same mask applied to all h heads.
-            mask = mask.unsqueeze(1)
-        nbatches = query.size(0)
-
-        # 1) Do all the linear projections in batch from d_model => h x d_k
-        query, key, value = [
-            lin(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-            for lin, x in zip(self.linears, (query, key, value))
-        ]
-
-        # 2) Apply attention on all the projected vectors in batch.
-        x, self.attn = attention(
-            query, key, value, mask=mask, dropout=self.dropout
-        )
-
-        # 3) "Concat" using a view and apply a final linear.
-        x = (
-            x.transpose(1, 2)
-            .contiguous()
-            .view(nbatches, -1, self.h * self.d_k)
-        )
-        del query
-        del key
-        del value
-        return self.linears[-1](x)
+        # Expected tensor dimensions:
+        # query: # (n_batch, n_query, d_model)
+        # key: # (n_batch, n_key, d_model)
+        # value: # (n_batch, n_key, d_model)
+        
+        # initialize storage for each head's outputs
+        head_attentions = []
+        head_coefficients = []
+        
+        for W_q, W_k, W_v in self.head_projections:
+            head_query_w = W_q(query) # (n_batch, n_query, d_k)
+            head_key_w = W_k(key) # (n_batch, n_key, d_k)
+            head_value_w = W_v(value) # (n_batch, n_key, d_k)
+            
+            head_attention = attention(head_query_w, head_key_w, head_value_w, mask, self.dropout) # (n_batch, n_query, d_k)
+            head_attentions.append(head_attention[0])
+            head_coefficients.append(head_attention[1])
+            
+        # combine individual heads' attention and coefficient outputs
+        multi_attention = torch.concat(head_attentions,-1) # (n_batch, n_query, d_model)
+        coefficient = torch.stack(head_coefficients, -1) # (n_batch, n_query, n_key, h)
+        
+        # populate coefficient storage attribute for this forward pass
+        self.attn = coefficient # (n_batch, n_query, n_key, h)
+        
+        # apply final linear projection for this layer
+        projected_attention = self.final_projection(multi_attention)
+        
+        return projected_attention

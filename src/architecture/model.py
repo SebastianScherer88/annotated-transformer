@@ -25,12 +25,12 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, src, tgt, src_mask, tgt_mask):
         "Take in and process masked src and target sequences."
-        print(f"Target: {type(tgt)}")
-        print(f"Target mask: {type(tgt_mask)}")
+        #print(f"Target: {type(tgt)}")
+        #print(f"Target mask: {type(tgt_mask)}")
         encoder_out = self.encode(src, src_mask)
-        print(f"Encoder output: {type(encoder_out)}")
+        #print(f"Encoder output: {type(encoder_out)}")
         decoder_out = self.decode(encoder_out, src_mask, tgt, tgt_mask)
-        print(f"Decoder output: {type(decoder_out)}")
+        #print(f"Decoder output: {type(decoder_out)}")
         return decoder_out
 
     def encode(self, src, src_mask):
@@ -68,8 +68,18 @@ def test_model(
     test_model = make_model(src_vocab_size,tgt_vocab_size,N,d_model,d_ff,h,dropout)
     test_model.eval()
     src = torch.LongTensor([[0, 1, 2, 3, 4]])
+    # Note that tensor dimensions during decoding inference are more dynamic in 
+    # the second dimension, as we keep adding tokens to the target sequence in
+    # an auto-regressive way. This means that the intuitive shape (1,5,5)
+    # would be incompatible in our implementation with the dynamic decoder 
+    # query tensor during inference with shapes (1,1,5), (1,2,5), (1,3,5), ...
+    # That's why the src_mask (`test_model`) uses masks that can be broadcasted
+    # along that dimension for the cross attention sublayers. Torch tensor
+    # operation implementations correctly resolves this to a broadcasted mask
+    # filler that is synonymous with every decoder query having access to every
+    # input sequence token's encoder output.
     src_mask = torch.ones(1, 1, 5)
-
+    
     memory = test_model.encode(src, src_mask)
     ys = torch.zeros(1, 1).type_as(src)
     
