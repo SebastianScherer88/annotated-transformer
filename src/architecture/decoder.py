@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from utils import clones, LayerNorm, SublayerConnection, PositionwiseFeedForward
-from attention import MultiHeadedAttention
+from architecture.utils import clones, LayerNorm, SublayerConnection, PositionwiseFeedForward
+from architecture.attention import decoder_mask_sa, decoder_mask_ca, MultiHeadedAttention
 
 # --- [3] DecoderLayer and Decoder
 class DecoderLayer(nn.Module):
@@ -21,15 +21,7 @@ class DecoderLayer(nn.Module):
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
         x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
         return self.sublayer[2](x, self.feed_forward)
-    
-def subsequent_mask(size):
-    "Mask out subsequent positions."
-    attn_shape = (1, size, size)
-    subsequent_mask = torch.triu(torch.ones(attn_shape), diagonal=1).type(
-        torch.uint8
-    )
-    return subsequent_mask == 0
-    
+        
 class Decoder(nn.Module):
     "Generic N layer decoder with masking."
 
@@ -42,9 +34,12 @@ class Decoder(nn.Module):
         
         # print(f"[DECODER] Decoder target: {x.size()}")
         # print(f"[DECODER] Decoder memory: {memory.size()}")
-        # print(f"[DECODER] Decoder input mask: {src_mask.size()}")
-        # print(f"[DECODER] Decoder target mask: {tgt_mask.size()}")
-        
+        #print(f"[DECODER] Decoder input mask pre transform: {src_mask.size()}")
+        #print(f"[DECODER] Decoder target mask pre transform: {tgt_mask.size()}")
+        tgt_mask = decoder_mask_sa(tgt_mask)
+        src_mask = decoder_mask_ca(src_mask)
+        #print(f"[DECODER] Decoder input mask post transform: {src_mask.size()}")
+        #print(f"[DECODER] Decoder target mask post transform: {tgt_mask.size()}")
         for layer in self.layers:
             x = layer(x, memory, src_mask, tgt_mask)
         x = self.norm(x)

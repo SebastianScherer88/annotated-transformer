@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import math
 
-from utils import clones
+from architecture.utils import clones
 
 def attention(query, key, value, coefficient_mask = None, dropout=None):
     # Expected tensor dimensions:
@@ -23,6 +23,59 @@ def attention(query, key, value, coefficient_mask = None, dropout=None):
     attention = torch.matmul(coefficient, value) # (n_batch, n_query, d_k)
     
     return attention, coefficient
+
+def padded_mask(mask):
+    """Create a mask to hide padding from a batch of padded sequences, src or
+    tgt, that is broadcastable in the 2nd (i.e. first sequence length)
+    dimension.
+    Expected dimensions:
+    mask: (n_batch, n_max_length), with entries 1 or 0
+    """
+    padded_mask = (mask != 0).unsqueeze(-2) # (n_batch, 1, n_max_length)
+
+    return padded_mask
+
+def subsequent_mask(size: int):
+    """Create a mask to hide subsequent positions, i.e. value vectors in an
+    attention layer, that is broadcastable in the 1st (i.e. batch) dimension.
+    """
+    attn_shape = (1, size, size)
+    not_subsequent_mask = torch.triu(torch.ones(attn_shape), diagonal=1).type(
+        torch.uint8
+    ) # (1, size, size)
+    subsequent_mask = not_subsequent_mask == 0
+
+    return subsequent_mask
+
+def encoder_mask(src_mask):
+    """Create a mask to hide padding to be used in the Encoder stack's self 
+    attention (sub)layers.
+    Expected dimensions:
+    src_mask: (n_batch, n_sequence_length)
+    """
+    
+    return padded_mask(src_mask)
+
+def decoder_mask_sa(tgt_mask):
+    """Create a mask to hide padding and future words (value vectors) to be used
+    in the Decoder stack's self attention (sub)layers.
+    Expected dimensions:
+    tgt_mask: (n_batch, n_sequence_length)
+    """
+    tgt_length = tgt_mask.size(-1)
+    dec_mask = padded_mask(tgt_mask) # (n_batch, 1, tgt_length)
+    dec_mask_sa = dec_mask & subsequent_mask(tgt_length).type_as(
+        dec_mask.data
+    ) # (n_batch, tgt_length, tgt_length)
+    return dec_mask_sa
+
+def decoder_mask_ca(src_mask):
+    """Create a mask to hide padding to be used in the Decoder stack's cross
+    attention (sub)layers.
+    Expected dimensions:
+    src_mask: (n_batch, n_sequence_length)
+    """
+    return padded_mask(src_mask)
 
 class MultiHeadedAttention(nn.Module):
     def __init__(self, h: int, d_model: int, dropout:float=0.1):

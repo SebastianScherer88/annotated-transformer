@@ -1,10 +1,6 @@
 import torch.nn as nn
-from utils import PositionwiseFeedForward, copy
-from attention import MultiHeadedAttention
-from embedding import PositionalEncoding, Embeddings
-from encoder import Encoder, EncoderLayer
-from decoder import Decoder, DecoderLayer, subsequent_mask
-from generator import Generator
+import copy
+from architecture import PositionwiseFeedForward, MultiHeadedAttention, PositionalEncoding, Embeddings, Encoder, EncoderLayer, Decoder, DecoderLayer, Generator
 import torch
 
 # --- [5] EncoderDecorder Model
@@ -23,15 +19,63 @@ class EncoderDecoder(nn.Module):
         self.tgt_embed = tgt_embed
         self.generator = generator
 
-    def forward(self, src, tgt, src_mask, tgt_mask):
-        "Take in and process masked src and target sequences."
-        #print(f"Target: {type(tgt)}")
-        #print(f"Target mask: {type(tgt_mask)}")
+    def forward(self, src, tgt, src_mask, tgt_mask, generate_last_only: bool = False):
+        """Take in and process masked src and target sequences to:
+        - generate encodings for all unmasked elements in input sequence
+        - generate decodings for all unmasked elements of tgt sequence
+        """
+        #print(f"Target: {tgt.size()}")
+        #print(f"Target mask: {tgt_mask.size()}")
         encoder_out = self.encode(src, src_mask)
-        #print(f"Encoder output: {type(encoder_out)}")
+        #print(f"Encoder output: {encoder_out.size()}")
         decoder_out = self.decode(encoder_out, src_mask, tgt, tgt_mask)
-        #print(f"Decoder output: {type(decoder_out)}")
-        return decoder_out
+        #print(f"Decoder output: {decoder_out.size()}")
+        generator_out = self.generate(decoder_out,generate_last_only=generate_last_only)
+            
+        return generator_out
+    
+    def generate(self, decoder_out, generate_last_only: bool = True):
+        """Generates probability distributions over target vocabulary for all
+        (unmasked) elements of the decoder representation of the tgt 
+        sequence"""
+        
+        # for greedy decoding during inference it will save time to only apply
+        # the generator to the last, newly generated decoder representation
+        if generate_last_only:
+            decoder_out = decoder_out[:, -1]
+        
+        generator_out = self.generator(decoder_out)
+        #print(f"Generator output: {generator_out.size()}")
+        return generator_out
+    
+    def greedy_decode(self, src, src_mask, max_len, start_symbol):
+        """Implements greedy decoding by repeatedly decoding + generating
+        output tokens and appending them to target sequence in subsequent 
+        forward pass."""
+        memory = self.encode(src, src_mask)
+        ys = torch.zeros(1, 1).fill_(start_symbol).type_as(src.data)
+        for i in range(max_len - 1):
+            # update mask for increased ys sequence
+            ys_mask = torch.ones(ys.size()).type_as(src.data)
+            # generate decoded representations for each element of the ys
+            # sequence
+            out = self.decode(
+                memory, src_mask, ys, ys_mask
+            )
+            # take the last element of the decoded representations of the ys 
+            # sequence
+            prob = self.generate(out)
+            # obtain index of largest prob score in this array. this is also the
+            # "index" of the corresponding token in our pseudo test target
+            # vocabulary
+            _, next_word = torch.max(prob, dim=1)
+            next_word = next_word.data[0]
+            # append this newly predicted token to the output ys sequence for 
+            # next forward pass
+            ys = torch.cat(
+                [ys, torch.zeros(1, 1).type_as(src.data).fill_(next_word)], dim=1
+            )
+        return ys
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
@@ -78,39 +122,19 @@ def test_model(
     # operation implementations correctly resolves this to a broadcasted mask
     # filler that is synonymous with every decoder query having access to every
     # input sequence token's encoder output.
-    src_mask = torch.ones(1, 1, 5)
-    
-    memory = test_model.encode(src, src_mask)
+    src_mask = torch.ones(1, 5)
     ys = torch.zeros(1, 1).type_as(src)
     
     print(f"[TEST] Source : {src} (size {src.size()})")
     print(f"[TEST] Source mask: {src_mask} (size {src_mask.size()})")
-    print(f"[TEST] Memory: {memory} (size {memory.size()})")
     print(f"[TEST] Target: {ys} (size {ys.size()})")
     print("[TEST] Starting inference...")
 
-    for i in range(n_out-1):
-        print(f"[TEST] Predicting output token {i}.")
-        ys_mask = subsequent_mask(ys.size(1)).type_as(src.data)
-        print(f"[TEST] Decoder target mask for token {i}: {ys_mask} (size {ys_mask.size()})")
-        out = test_model.decode(
-            memory, src_mask, ys, ys_mask
-        )
-        print(f"[TEST] Decoder output for token {i}: {out} (size {out.size()})")
-        generator_in = out[:, -1]
-        print(f"[TEST] Generator input for token {i}: {generator_in} (size {generator_in.size()})")
-        prob = test_model.generator(generator_in)
-        print(f"[TEST] Generator output for token {i}: {prob} (size {prob.size()})")
-        _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.data[0]
-        ys = torch.cat(
-            [ys, torch.empty(1, 1).type_as(src.data).fill_(next_word)], dim=1
-        )
-        print(f"[TEST] Decoder target for token {i}: {ys} (size {ys.size()})")
-        print("==============================")
+    ys = test_model.greedy_decode(src, src_mask, 10, 0)
 
     print("Example Untrained Model Prediction:", ys)
     
 def run_model_test(n_test: int = 10, n_out: int = 10):
     for _ in range(n_test):
+        print("-----------------------")
         test_model(n_out=n_out)

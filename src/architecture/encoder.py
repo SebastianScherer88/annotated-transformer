@@ -1,7 +1,7 @@
 import torch.nn as nn
 
-from utils import clones, SublayerConnection, LayerNorm, PositionwiseFeedForward
-from attention import MultiHeadedAttention
+from architecture.utils import clones, SublayerConnection, LayerNorm, PositionwiseFeedForward
+from architecture.attention import encoder_mask, MultiHeadedAttention
 
 # --- [2] EncoderLayer and Encoder
 class EncoderLayer(nn.Module):
@@ -31,7 +31,9 @@ class Encoder(nn.Module):
         "Pass the input (and mask) through each layer in turn."
         
         # print(f"[ENCODER] Encoder input: {x.size()}")
-        # print(f"[ENCODER] Encoder mask: {mask.size()}")
+        #print(f"[ENCODER] Encoder mask pre transform: {mask.size()}")
+        mask = encoder_mask(mask)
+        #print(f"[ENCODER] Encoder mask post transform: {mask.size()}")
         
         for layer in self.layers:
             x = layer(x, mask)
