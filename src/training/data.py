@@ -4,21 +4,25 @@ import torch
 from torch.nn.functional import pad
 from torchtext.data.functional import to_map_style_dataset
 from torch.utils.data import DataLoader
-from torchtext.vocab import build_vocab_from_iterator
+from torchtext.vocab import build_vocab_from_iterator, Vocab
 import torchtext.datasets as datasets
 import spacy
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 from torch.utils.data.distributed import DistributedSampler
 from training import SpecialTokens
 
 class Preprocessor(object):
     
-    tokenizer_src: spacy.Tokenizer
-    tokenizer_tgt: spacy.Tokenizer
-    vocab_src: torch.utils.Vocabulary
-    vocab_tgt: torch.utils.Vocabulary
+    tokenizer_src: spacy.language.Language
+    tokenizer_tgt: spacy.language.Language
+    vocab_src: Vocab
+    vocab_tgt: Vocab
     vocab_src_size: int
     vocab_tgt_size: int
+    tokenizer_map: Dict[str,str] = {
+        "en": "en_core_web_sm",
+        "de": "de_core_news_sm",
+    }
     
     def __init__(self, language_src: str = "de", language_tgt: str="en", max_padding:int=128):
         self.language_src = language_src
@@ -28,29 +32,29 @@ class Preprocessor(object):
         self.vocab_src_size, self.vocab_tgt_size = len(self.vocab_src), len(self.vocab_tgt)
         self.max_padding = max_padding
     
-    def load_tokenizers(self) -> Tuple[spacy.Tokenizer,spacy.Tokenizer]:
+    def load_tokenizers(self) -> Tuple[spacy.language.Language,spacy.language.Language]:
         """Returns spacy tokenizers for the source and target language."""
 
         tokenizers = []
 
         for language in (self.language_src,self.language_tgt):
             try:
-                tokenizer = spacy.load(f"{language}_core_news_sm")
+                tokenizer = spacy.load(self.tokenizer_map[language])
             except IOError:
-                os.system(f"python -m spacy download {language}_core_news_sm")
-                tokenizer = spacy.load(f"{language}_core_news_sm")
+                os.system(f"python -m spacy download {self.tokenizer_map[language]}")
+                tokenizer = spacy.load(self.tokenizer_map[language])
             tokenizers.append(tokenizer)
 
         return tokenizers
 
-    def tokenize_src(self, text):
+    def tokenize_src(self, text: str):
         return [tok.text for tok in self.tokenizer_src.tokenizer(text)]
     
-    def tokenize_tgt(self, text):
+    def tokenize_tgt(self, text: str):
         return [tok.text for tok in self.tokenizer_tgt.tokenizer(text)]
 
     @staticmethod
-    def yield_tokens(data_iter, tokenizer, index):
+    def yield_tokens(data_iter, tokenizer: spacy.language.Language, index: int):
         for from_to_tuple in data_iter:
             yield tokenizer(from_to_tuple[index])
         
@@ -95,8 +99,9 @@ class Preprocessor(object):
         device,
         max_padding=128,
     ) -> Tuple[torch.Tensor,torch.Tensor]:
-        bs_id = torch.tensor([self.vocab_src.get_stoi(SpecialTokens.start.value)], device=device)  # <s> token id
-        eos_id = torch.tensor([self.vocab_src.get_stoi(SpecialTokens.end.value)], device=device)  # </s> token id
+        
+        bs_id = torch.tensor([self.vocab_src.get_stoi()[SpecialTokens.start.value]], device=device)  # <s> token id
+        eos_id = torch.tensor([self.vocab_src.get_stoi()[SpecialTokens.end.value]], device=device)  # </s> token id
         src_list, tgt_list = [], []
         for (_src, _tgt) in batch:
             processed_src = torch.cat(
@@ -131,14 +136,14 @@ class Preprocessor(object):
                         0,
                         max_padding - len(processed_src),
                     ),
-                    value=self.vocab_src.stoi(SpecialTokens.blank.value),
+                    value=self.vocab_src.get_stoi()[SpecialTokens.blank.value],
                 )
             )
             tgt_list.append(
                 pad(
                     processed_tgt,
                     (0, max_padding - len(processed_tgt)),
-                    value=self.vocab_tgt.stoi(SpecialTokens.blank.value),
+                    value=self.vocab_tgt.get_stoi()[SpecialTokens.blank.value],
                 )
             )
 

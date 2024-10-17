@@ -72,7 +72,7 @@ def train_worker(
     print(f"Train worker process using GPU: {gpu} for training", flush=True)
     torch.cuda.set_device(gpu)
     
-    preprocessor = Preprocessor(config['language_src'],config['language_tgt'],config['max_padding'])
+    preprocessor = Preprocessor(config['source_language'],config['target_language'],config['max_padding'])
 
     pad_idx = preprocessor.vocab_tgt[SpecialTokens.blank.value]
     d_model = 512
@@ -95,6 +95,7 @@ def train_worker(
 
     train_dataloader, valid_dataloader = create_dataloaders(
         gpu,
+        preprocessor,
         batch_size=config["batch_size"] // ngpus_per_node,
         is_distributed=is_distributed,
     )
