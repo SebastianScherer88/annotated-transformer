@@ -1,3 +1,6 @@
+from enum import Enum
+from typing import List
+
 class Batch:
     """Object for holding a batch of data with mask during training."""
 
@@ -28,3 +31,13 @@ def rate(step, model_size, factor, warmup):
     return factor * (
         model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5))
     )
+    
+class SpecialTokens(Enum):
+    start: str="<s>"
+    end: str="</s>"
+    blank: str="<blank>"
+    unk: str="<unk>"
+    
+    @classmethod
+    def list(cls) -> List[str]:
+        return [a.value for a in cls]

@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from architecture import EncoderDecoder, make_model
-from training import TrainState, Batch, rate, LabelSmoothing, SimpleLossCompute, DummyOptimizer, DummyScheduler, load_tokenizers, load_vocab, create_dataloaders
+from training import TrainState, Batch, rate, SpecialTokens, LabelSmoothing, SimpleLossCompute, DummyOptimizer, DummyScheduler, Preprocessor, create_dataloaders
 
 def run_epoch(
     data_iter,
@@ -66,19 +66,17 @@ def run_epoch(
 def train_worker(
     gpu,
     ngpus_per_node,
-    vocab_src,
-    vocab_tgt,
-    spacy_de,
-    spacy_en,
     config,
     is_distributed=False,
 ):
     print(f"Train worker process using GPU: {gpu} for training", flush=True)
     torch.cuda.set_device(gpu)
+    
+    preprocessor = Preprocessor(config['language_src'],config['language_tgt'],config['max_padding'])
 
-    pad_idx = vocab_tgt["<blank>"]
+    pad_idx = preprocessor.vocab_tgt[SpecialTokens.blank.value]
     d_model = 512
-    model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    model = make_model(preprocessor.vocab_src_size, preprocessor.vocab_tgt_size, N=6)
     model.cuda(gpu)
     module = model
     is_main_process = True
@@ -91,18 +89,13 @@ def train_worker(
         is_main_process = gpu == 0
 
     criterion = LabelSmoothing(
-        size=len(vocab_tgt), padding_idx=pad_idx, smoothing=0.1
+        size=preprocessor.vocab_tgt_size, padding_idx=pad_idx, smoothing=0.1
     )
     criterion.cuda(gpu)
 
     train_dataloader, valid_dataloader = create_dataloaders(
         gpu,
-        vocab_src,
-        vocab_tgt,
-        spacy_de,
-        spacy_en,
         batch_size=config["batch_size"] // ngpus_per_node,
-        max_padding=config["max_padding"],
         is_distributed=is_distributed,
     )
 
@@ -158,8 +151,8 @@ def train_worker(
         file_path = "%sfinal.pt" % config["file_prefix"]
         torch.save(module.state_dict(), file_path)
         
-def train_distributed_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
-    from the_annotated_transformer import train_worker
+def train_distributed_model(config):
+    from train import train_worker
 
     ngpus = torch.cuda.device_count()
     os.environ["MASTER_ADDR"] = "localhost"
@@ -169,23 +162,21 @@ def train_distributed_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
     mp.spawn(
         train_worker,
         nprocs=ngpus,
-        args=(ngpus, vocab_src, vocab_tgt, spacy_de, spacy_en, config, True),
+        args=(ngpus, config, True),
     )
 
 
-def train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config):
+def train_model(config):
     if config["distributed"]:
-        train_distributed_model(
-            vocab_src, vocab_tgt, spacy_de, spacy_en, config
-        )
+        train_distributed_model(config)
     else:
-        train_worker(
-            0, 1, vocab_src, vocab_tgt, spacy_de, spacy_en, config, False
-        )
+        train_worker(0, 1, config, False)
 
 
 def load_trained_model():
     config = {
+        "source_language":"de",
+        "target_language":"en",
         "batch_size": 32,
         "distributed": False,
         "num_epochs": 8,
@@ -196,14 +187,12 @@ def load_trained_model():
         "file_prefix": "multi30k_model_",
     }
     
-    spacy_de, spacy_en = load_tokenizers()
-    vocab_src, vocab_tgt = load_vocab(spacy_de, spacy_en)
-        
     model_path = "multi30k_model_final.pt"
     if not exists(model_path):
-        train_model(vocab_src, vocab_tgt, spacy_de, spacy_en, config)
+        train_model(config)
 
-    model = make_model(len(vocab_src), len(vocab_tgt), N=6)
+    preprocessor = Preprocessor(config["source_language"],config["target_language"],config["max_padding"])
+    model = make_model(preprocessor.vocab_src_size, preprocessor.vocab_tgt_size, N=6)
     model.load_state_dict(torch.load("multi30k_model_final.pt"))
     return model
 
