@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import List
+from pydantic import BaseModel, validator
 
 class Batch:
     """Object for holding a batch of data with mask during training."""
@@ -32,12 +33,60 @@ def rate(step, model_size, factor, warmup):
         model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5))
     )
     
-class SpecialTokens(Enum):
-    start: str="<s>"
-    end: str="</s>"
-    blank: str="<blank>"
-    unk: str="<unk>"
+class ListEnum(Enum):
     
     @classmethod
     def list(cls) -> List[str]:
         return [a.value for a in cls]
+    
+class SpecialTokens(ListEnum):
+    start: str="<s>"
+    end: str="</s>"
+    blank: str="<blank>"
+    unk: str="<unk>"
+
+class SupportedDatasets(ListEnum):
+    iwslt2016: str="iwslt2016"
+    iwslt2017: str="iwslt2017"
+    multi30k: str="multi30k"
+    
+class SupportedLanguages(ListEnum):
+    english: str="en"
+    french: str="fr"
+    german: str="de"
+    arabic: str="ar"
+    czech: str ="cs"
+    italian: str = "it"
+    romanian: str = "ro"
+    dutch: str = "nl"
+    
+class TrainConfig(BaseModel):
+    dataset:str=SupportedDatasets.multi30k.value
+    source_language:str=SupportedLanguages.german.value
+    target_language:str=SupportedLanguages.english.value
+    batch_size:int=32
+    distributed:bool=False
+    num_epochs:int=8
+    accum_iter:int=10
+    base_lr:float=1.0
+    max_padding:int=72
+    warmup:int=3000
+    file_prefix:str="model_"
+    
+    @validator("dataset")
+    def check_languages(v):
+        assert v in SupportedDatasets.list()
+        
+        return v
+        
+    @validator("source_language")
+    def check_source_language(v):
+        assert v in SupportedLanguages.list()
+ 
+        return v
+        
+    @validator("target_language")
+    def check_target_language(v):
+        assert v in SupportedLanguages.list()
+        
+        return v

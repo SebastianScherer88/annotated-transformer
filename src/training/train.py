@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from architecture import EncoderDecoder, make_model
-from training import TrainState, Batch, rate, SpecialTokens, LabelSmoothing, SimpleLossCompute, DummyOptimizer, DummyScheduler, Preprocessor, create_dataloaders
+from training import TrainState, Batch, rate, SpecialTokens, SupportedDatasets, SupportedLanguages, TrainConfig, LabelSmoothing, SimpleLossCompute, DummyOptimizer, DummyScheduler, Preprocessor, create_dataloaders
 
 def run_epoch(
     data_iter,
@@ -64,15 +64,15 @@ def run_epoch(
     return total_loss / total_tokens, train_state
 
 def train_worker(
-    gpu,
-    ngpus_per_node,
-    config,
+    gpu: int,
+    ngpus_per_node: int,
+    config: TrainConfig,
     is_distributed=False,
 ):
     print(f"Train worker process using GPU: {gpu} for training", flush=True)
     torch.cuda.set_device(gpu)
     
-    preprocessor = Preprocessor(config['source_language'],config['target_language'],config['max_padding'])
+    preprocessor = Preprocessor(config.source_language,config.target_language,config.max_padding)
 
     pad_idx = preprocessor.vocab_tgt[SpecialTokens.blank.value]
     d_model = 512
@@ -96,22 +96,23 @@ def train_worker(
     train_dataloader, valid_dataloader = create_dataloaders(
         gpu,
         preprocessor,
-        batch_size=config["batch_size"] // ngpus_per_node,
+        config.dataset,
+        batch_size=config.batch_size // ngpus_per_node,
         is_distributed=is_distributed,
     )
 
     optimizer = torch.optim.Adam(
-        model.parameters(), lr=config["base_lr"], betas=(0.9, 0.98), eps=1e-9
+        model.parameters(), lr=config.base_lr, betas=(0.9, 0.98), eps=1e-9
     )
     lr_scheduler = LambdaLR(
         optimizer=optimizer,
         lr_lambda=lambda step: rate(
-            step, d_model, factor=1, warmup=config["warmup"]
+            step, d_model, factor=1, warmup=config.warmup
         ),
     )
     train_state = TrainState()
 
-    for epoch in range(config["num_epochs"]):
+    for epoch in range(config.num_epochs):
         if is_distributed:
             train_dataloader.sampler.set_epoch(epoch)
             valid_dataloader.sampler.set_epoch(epoch)
@@ -125,13 +126,13 @@ def train_worker(
             optimizer,
             lr_scheduler,
             mode="train+log",
-            accum_iter=config["accum_iter"],
+            accum_iter=config.accum_iter,
             train_state=train_state,
         )
 
         GPUtil.showUtilization()
         if is_main_process:
-            file_path = "%s%.2d.pt" % (config["file_prefix"], epoch)
+            file_path = f"{config.file_prefix}{epoch}.pt"
             torch.save(module.state_dict(), file_path)
         torch.cuda.empty_cache()
 
@@ -149,7 +150,7 @@ def train_worker(
         torch.cuda.empty_cache()
 
     if is_main_process:
-        file_path = "%sfinal.pt" % config["file_prefix"]
+        file_path = f"{config.file_prefix}final.pt"
         torch.save(module.state_dict(), file_path)
         
 def train_distributed_model(config):
@@ -166,36 +167,37 @@ def train_distributed_model(config):
         args=(ngpus, config, True),
     )
 
+def train_model(
+    dataset:str=SupportedDatasets.multi30k.value,
+    source_language:str=SupportedLanguages.german.value,
+    target_language:str=SupportedLanguages.english.value,
+    batch_size:int=32,
+    distributed:bool=False,
+    num_epochs:int=8,
+    accum_iter:int=10,
+    base_lr:float=1.0,
+    max_padding:int=72,
+    warmup:int=3000,
+    file_prefix:str="multi30k_model_",
+):
+    config = TrainConfig(
+        dataset=dataset,
+        source_language=source_language,
+        target_language=target_language,
+        batch_size=batch_size,
+        distributed=distributed,
+        num_epochs=num_epochs,
+        accum_iter=accum_iter,
+        base_lr=base_lr,
+        max_padding=max_padding,
+        warmup=warmup,
+        file_prefix=file_prefix,
+    )
 
-def train_model(config):
-    if config["distributed"]:
+    if distributed:
         train_distributed_model(config)
     else:
         train_worker(0, 1, config, False)
 
-
-def load_trained_model():
-    config = {
-        "source_language":"de",
-        "target_language":"en",
-        "batch_size": 32,
-        "distributed": False,
-        "num_epochs": 8,
-        "accum_iter": 10,
-        "base_lr": 1.0,
-        "max_padding": 72,
-        "warmup": 3000,
-        "file_prefix": "multi30k_model_",
-    }
-    
-    model_path = "multi30k_model_final.pt"
-    if not exists(model_path):
-        train_model(config)
-
-    preprocessor = Preprocessor(config["source_language"],config["target_language"],config["max_padding"])
-    model = make_model(preprocessor.vocab_src_size, preprocessor.vocab_tgt_size, N=6)
-    model.load_state_dict(torch.load("multi30k_model_final.pt"))
-    return model
-
 if __name__ == "__main__":
-    load_trained_model()
+    train_model()

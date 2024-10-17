@@ -9,7 +9,13 @@ import torchtext.datasets as datasets
 import spacy
 from typing import Tuple, List, Dict
 from torch.utils.data.distributed import DistributedSampler
-from training import SpecialTokens
+from training import SpecialTokens, SupportedLanguages
+
+TRANSLATION_DATASETS = {
+    "iwslt2016": datasets.IWSLT2016,
+    "iwslt2017": datasets.IWSLT2017,
+    "multi30k": datasets.Multi30k,
+}
 
 class Preprocessor(object):
     
@@ -20,11 +26,11 @@ class Preprocessor(object):
     vocab_src_size: int
     vocab_tgt_size: int
     tokenizer_map: Dict[str,str] = {
-        "en": "en_core_web_sm",
-        "de": "de_core_news_sm",
+        SupportedLanguages.english.value: "en_core_web_sm",
+        SupportedLanguages.german.value: "de_core_news_sm",
     }
     
-    def __init__(self, language_src: str = "de", language_tgt: str="en", max_padding:int=128):
+    def __init__(self, language_src:str=SupportedLanguages.german.value, language_tgt:str=SupportedLanguages.english.value, max_padding:int=128):
         self.language_src = language_src
         self.language_tgt = language_tgt
         self.tokenizer_src, self.tokenizer_tgt = self.load_tokenizers()
@@ -154,6 +160,7 @@ class Preprocessor(object):
 def create_dataloaders(
     device,
     preprocessor: Preprocessor,
+    dataset: str, 
     batch_size=12000,
     is_distributed=True,
 ):
@@ -164,8 +171,8 @@ def create_dataloaders(
             device,
         )
 
-    train_iter, valid_iter, test_iter = datasets.Multi30k(
-        language_pair=("de", "en")
+    train_iter, valid_iter, test_iter = TRANSLATION_DATASETS[dataset](
+        language_pair=(preprocessor.language_src, preprocessor.language_tgt)
     )
 
     train_iter_map = to_map_style_dataset(
