@@ -9,13 +9,7 @@ import torchtext.datasets as datasets
 import spacy
 from typing import Tuple, List, Dict
 from torch.utils.data.distributed import DistributedSampler
-from training import SpecialTokens, SupportedLanguages
-
-TRANSLATION_DATASETS = {
-    "iwslt2016": datasets.IWSLT2016,
-    "iwslt2017": datasets.IWSLT2017,
-    "multi30k": datasets.Multi30k,
-}
+from training import SpecialTokens, SupportedLanguages, TRANSLATION_DATASETS
 
 class Preprocessor(object):
     
@@ -175,9 +169,7 @@ def create_dataloaders(
         language_pair=(preprocessor.language_src, preprocessor.language_tgt)
     )
 
-    train_iter_map = to_map_style_dataset(
-        train_iter
-    )  # DistributedSampler needs a dataset len()
+    train_iter_map = to_map_style_dataset(train_iter)  # DistributedSampler needs a dataset len()
     train_sampler = (
         DistributedSampler(train_iter_map) if is_distributed else None
     )
@@ -185,6 +177,9 @@ def create_dataloaders(
     valid_sampler = (
         DistributedSampler(valid_iter_map) if is_distributed else None
     )
+    
+    print(f"Size of train dataset: {len(train_iter_map)}")
+    print(f"Size of valid dataset: {len(valid_iter_map)}")
 
     train_dataloader = DataLoader(
         train_iter_map,

@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import List
 from pydantic import BaseModel, validator
+from torchtext import datasets
 
 class Batch:
     """Object for holding a batch of data with mask during training."""
@@ -49,6 +50,12 @@ class SupportedDatasets(ListEnum):
     iwslt2016: str="iwslt2016"
     iwslt2017: str="iwslt2017"
     multi30k: str="multi30k"
+    
+TRANSLATION_DATASETS = {
+    SupportedDatasets.iwslt2016.value: datasets.IWSLT2016,
+    SupportedDatasets.iwslt2017.value: datasets.IWSLT2017,
+    SupportedDatasets.multi30k.value: datasets.Multi30k,
+}
     
 class SupportedLanguages(ListEnum):
     english: str="en"
